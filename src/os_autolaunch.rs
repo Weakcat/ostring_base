@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use auto_launch::{AutoLaunch, AutoLaunchBuilder};
-use once_cell::sync::OnceCell;
+use std::sync::OnceLock;
 use tokio::sync::Mutex;
 use std::env::current_exe;
 use std::sync::Arc;
@@ -11,7 +11,7 @@ pub struct Osys {
 
 impl Osys {
     pub fn global() -> &'static Osys {
-        static SYSOPT: OnceCell<Osys> = OnceCell::new();
+        static SYSOPT: OnceLock<Osys> = OnceLock::new();
 
         SYSOPT.get_or_init(|| Osys {
             auto_launch: Arc::new(Mutex::new(None)),
@@ -93,24 +93,7 @@ impl Osys {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use tokio;
-
-    // 辅助函数：创建测试路径
-    fn create_test_exe_path() -> PathBuf {
-        #[cfg(target_os = "windows")]
-        {
-            PathBuf::from(r"C:\Program Files\MyApp\app.exe")
-        }
-        #[cfg(target_os = "macos")]
-        {
-            PathBuf::from("/Applications/MyApp.app/Contents/MacOS/app")
-        }
-        #[cfg(target_os = "linux")]
-        {
-            PathBuf::from("/usr/local/bin/app")
-        }
-    }
 
     #[tokio::test]
     async fn test_osys_singleton() {
