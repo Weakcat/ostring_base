@@ -1,6 +1,6 @@
 [package]
 name = "ostring_base"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 authors = ["weak_cat"]
 description = "ostring base crate include some basic function"
