@@ -1,20 +1,20 @@
 [package]
 name = "ostring_base"
-version = "1.0.1"
-edition = "2021"
+version = "2.0.0"
+edition = "2024"
 authors = ["weak_cat"]
 description = "ostring base crate include some basic function"
 license = "MIT"
 repository = "https://github.com/Weakcat/ostring_base.git"
 
 [dependencies]
-anyhow = "1.0.96"
-tokio = { version = "1.43.0", features = ["full"] }
-sysinfo = "0.33.1"
+anyhow = "1.0.98"
+tokio = { version = "1.44.2", features = ["full"] }
+sysinfo = "0.34.2"
 auto-launch = "0.5.0"
-serialport = "4.7.0"
-serde = { version = "1.0.218", features = ["derive"] }
+serialport = "4.7.1"
+serde = { version = "1.0.219", features = ["derive"] }
 
 [dev-dependencies]
-tokio = { version = "1.43.0", features = ["full"] }
-serialport = "4.7.0"
+tokio = { version = "1.44.2", features = ["full"] }
+serialport = "4.7.1"
