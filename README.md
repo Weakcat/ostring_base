@@ -1,6 +1,6 @@
 # OS System Tools
 
-一个用 Rust 编写的系统工具集合，提供系统信息获取、串口管理和自动启动配置等功能。
+一个用 Rust 编写的系统工具集合，提供系统信息获取、文件路径管理、串口管理和自动启动配置等功能。
 
 ## 功能特性
 
@@ -9,6 +9,11 @@
   - 系统名称和版本
   - 主机名
   - 网络接口信息
+
+- 📁 路径管理
+  - 链式API设计
+  - 目录/文件自动创建
+  - 类型安全的路径操作
 
 - 🔌 串口管理
   - 列出可用串口
@@ -50,6 +55,34 @@ let info = OsSysInfo::get_info();
 println!("{:?}", info);
 ```
 
+### 路径管理 (链式API)
+
+```rust
+use ostring_base::os_path::{PathManager, app_file_path};
+
+// 获取并确保应用配置文件存在
+let config_path = app_file_path("myapp", "config.json")?;
+
+// 自定义路径操作
+let mut log_manager = PathManager::get_data_dir()?;
+log_manager.join_dir("myapp")?
+           .join_dir("logs")?
+           .ensure()?;
+let log_dir = log_manager.path();
+    
+// 文件路径（注意：文件路径后不能再join）
+let mut file_manager = PathManager::get_data_dir()?;
+file_manager.join_dir("myapp")?
+            .join_file("data.log")?;  // 此时path_type为File
+    
+// 以下操作会返回错误
+// file_manager.join_dir("logs")?; // 错误：无法在文件路径上进行join操作
+
+// 创建并获取文件路径
+file_manager.ensure()?;
+let file_path = file_manager.string()?;
+```
+
 ### 串口列表
 
 ```rust
@@ -61,10 +94,17 @@ println!("{:?}", ports);
 
 ### 自动启动配置
 ```rust
-use ostring_base::os_autolaunch::OsAutoLaunch;
+use ostring_base::os_autolaunch::AutoLaunchManager;
 
-let osys = OsAutoLaunch::new();
-osys.update_launch(true).await;
+// 检查是否启用了自动启动
+let is_enabled = AutoLaunchManager::is_enabled()?;
+println!("自动启动状态: {}", is_enabled);
+
+// 启用自动启动
+AutoLaunchManager::update_launch(true)?;
+
+// 禁用自动启动
+AutoLaunchManager::update_launch(false)?;
 ```
 
 
@@ -74,7 +114,7 @@ osys.update_launch(true).await;
 - `sysinfo`: 系统信息获取
 - `serialport`: 串口通信
 - `auto-launch`: 自动启动配置
-- `tokio`: 异步运行时
+- `dirs`: 系统目录路径获取
 - `anyhow`: 错误处理
 
 ## 开发

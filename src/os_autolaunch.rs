@@ -1,34 +1,37 @@
 use anyhow::{anyhow, Result};
 use auto_launch::{AutoLaunch, AutoLaunchBuilder};
-use std::sync::OnceLock;
-use tokio::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::env::current_exe;
-use std::sync::Arc;
 
-pub struct Osys {
-    auto_launch: Arc<Mutex<Option<AutoLaunch>>>,
-}
+/// 自动启动管理模块
+pub struct AutoLaunchManager;
 
-impl Osys {
-    pub fn global() -> &'static Osys {
-        static SYSOPT: OnceLock<Osys> = OnceLock::new();
-
-        SYSOPT.get_or_init(|| Osys {
-            auto_launch: Arc::new(Mutex::new(None)),
-        })
+impl AutoLaunchManager {
+    /// 保存AutoLaunch实例的静态OnceLock
+    fn auto_launch_instance() -> &'static OnceLock<Arc<Mutex<AutoLaunch>>> {
+        static AUTO_LAUNCH: OnceLock<Arc<Mutex<AutoLaunch>>> = OnceLock::new();
+        &AUTO_LAUNCH
     }
 
-    pub async fn init_launch(&self) -> Result<()> {
+    /// 获取AutoLaunch实例，如果不存在则创建
+    fn get_or_init_autolaunch() -> Result<AutoLaunch> {
+        // 如果已初始化，直接返回克隆
+        if let Some(auto_launch) = Self::auto_launch_instance().get() {
+            let guard = auto_launch.lock().map_err(|_| anyhow!("获取锁失败"))?;
+            return Ok(guard.clone());
+        }
+        
+        // 需要初始化
         let app_exe = current_exe()?;
         let app_name = app_exe
             .file_stem()
             .and_then(|f| f.to_str())
-            .ok_or(anyhow!("failed to get file stem"))?;
+            .ok_or(anyhow!("无法获取应用程序名称"))?;
 
         let app_path = app_exe
             .as_os_str()
             .to_str()
-            .ok_or(anyhow!("failed to get app_path"))?
+            .ok_or(anyhow!("无法获取应用程序路径"))?
             .to_string();
 
         #[cfg(target_os = "windows")]
@@ -46,44 +49,44 @@ impl Osys {
         })()
         .unwrap_or(app_path);
 
+        // Linux平台专用配置，注意我们移除了对外部crate的依赖
         #[cfg(target_os = "linux")]
-        let app_path = {
-            use crate::core::handle::Handle;
-            use tauri::Manager;
-
-            let handle = Handle::global();
-            match handle.app_handle.lock().as_ref() {
-                Some(app_handle) => {
-                    let appimage = app_handle.env().appimage;
-                    appimage
-                        .and_then(|p| p.to_str().map(|s| s.to_string()))
-                        .unwrap_or(app_path)
-                }
-                None => app_path,
-            }
-        };
-
+        let app_path = app_path; // 在Linux下直接使用可执行文件路径
+        
         let auto = AutoLaunchBuilder::new()
             .set_app_name(app_name)
             .set_app_path(&app_path)
             .build()?;
-        *self.auto_launch.lock().await = Some(auto);
-        Ok(())
+        
+        // 使用OnceLock保存新创建的AutoLaunch
+        let auto_arc = Arc::new(Mutex::new(auto.clone()));
+        match Self::auto_launch_instance().set(auto_arc) {
+            Ok(_) => Ok(auto),
+            Err(_) => {
+                // 如果在我们初始化的过程中，其他线程已经初始化了
+                // 使用已存在的值
+                let existing = Self::auto_launch_instance().get().unwrap();
+                let guard = existing.lock().map_err(|_| anyhow!("获取锁失败"))?;
+                Ok(guard.clone())
+            }
+        }
     }
 
-    pub async fn update_launch(&self, enable: bool) -> Result<()> {
-        let auto_launch = self.auto_launch.lock().await;
-        if auto_launch.is_none() {
-            self.init_launch().await?;
-        }
+    /// 检查自动启动是否已启用
+    pub fn is_enabled() -> Result<bool> {
+        let auto = Self::get_or_init_autolaunch()?;
+        Ok(auto.is_enabled()?)
+    }
 
-        // 如果程序启动的时候调用disable，而原本注册表没有自动启动的话 就会在disable那边传播错误
-        // 所以要忽略disable的错误
+    /// 更新自动启动状态
+    /// 
+    /// * `enable` - 设置为true启用自动启动，false禁用自动启动
+    pub fn update_launch(enable: bool) -> Result<()> {
+        let auto = Self::get_or_init_autolaunch()?;
+        
         match enable {
-            true => auto_launch.as_ref().unwrap().enable()?,
-            false => match auto_launch.as_ref().unwrap().disable() {
-                _ => {}
-            },
+            true => auto.enable()?,
+            false => auto.disable()?,
         };
 
         Ok(())
@@ -93,39 +96,24 @@ impl Osys {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio;
 
-    #[tokio::test]
-    async fn test_osys_singleton() {
-        let instance1 = Osys::global();
-        let instance2 = Osys::global();
+    #[test]
+    fn test_autolaunch_manager() {
+        // 验证初始状态
+        assert!(AutoLaunchManager::auto_launch_instance().get().is_none(), "初始状态应为None");
         
-        // 验证单例模式
-        assert!(std::ptr::eq(instance1, instance2), "应该返回相同的实例");
-    }
-
-    #[tokio::test]
-    async fn test_init_launch() {
-        let osys = Osys::global();
-        let result = osys.init_launch().await;
-        assert!(result.is_ok(), "初始化应该成功");
+        // 测试启用自动启动（同时会初始化）
+        assert!(AutoLaunchManager::update_launch(true).is_ok(), "启用自动启动应该成功");
         
-        // 验证 auto_launch 已被初始化
-        let auto_launch = osys.auto_launch.lock().await;
-        assert!(auto_launch.is_some(), "auto_launch 不应为 None");
-    }
-
-    #[tokio::test]
-    async fn test_update_launch() {
-        let osys = Osys::global();
+        // 验证已被初始化
+        assert!(AutoLaunchManager::auto_launch_instance().get().is_some(), "auto_launch 应该已初始化");
         
-        // 测试启用自动启动
-        let enable_result = osys.update_launch(true).await;
-        assert!(enable_result.is_ok(), "启用自动启动应该成功");
-
         // 测试禁用自动启动
-        let disable_result = osys.update_launch(false).await;
-        assert!(disable_result.is_ok(), "禁用自动启动应该成功");
+        assert!(AutoLaunchManager::update_launch(false).is_ok(), "禁用自动启动应该成功");
+        
+        // 测试检查是否启用
+        let is_enabled = AutoLaunchManager::is_enabled();
+        assert!(is_enabled.is_ok(), "检查自动启动状态应该成功");
     }
 
     #[cfg(target_os = "macos")]
